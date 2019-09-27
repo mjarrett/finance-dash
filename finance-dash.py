@@ -6,9 +6,12 @@ import dash_auth
 import plotly.graph_objects as go
 from dash.dependencies import Input, Output
 
+from credentials import *
+
 import pandas as pd
 import datetime
 import json
+import numpy as np
 
 # colors = [
 #     '#1f77b4',  # muted blue
@@ -31,29 +34,53 @@ colors = {'Expenses':'#1f77b4',
 
 today = datetime.datetime.now()
 limit = today-datetime.timedelta(30)
+start = datetime.datetime(2019,1,1)
+
+def make_table(df,value='Price'):
+
+    df.index = pd.to_datetime(df.index)
+    df = df.reset_index()
 
 
-def get_dfs():
+    df['Month'] = df['Date'].map(lambda x: x.strftime("%Y-%m"))
+
+    df.Price = df.Price.astype(float)
+    df.Refund = df.Refund.astype(float)
 
 
-    def get_sheet(baseurl,gid,):
-        url = f'{baseurl}/export?gid={gid}&format=csv'
+    table =  pd.pivot_table(df,values=value,columns=['Category'],index='Month',aggfunc=np.sum)
+    table.index = pd.to_datetime(table.index)
+    df.index.names = ['Date']
+    return table
+    
+print('Querying google doc')
+def get_sheet(baseurl,gid,):
+    url = f'{baseurl}/export?gid={gid}&format=csv'
 
-        df = pd.read_csv(url,index_col='Date')
-        df.index = pd.to_datetime(df.index)
+    df = pd.read_csv(url,index_col='Date')
+    df.index = pd.to_datetime(df.index)
 
-        return df
+    return df
 
-    df_expenses = get_sheet(url,gid_expenses)
-    df_income = get_sheet(url,gid_income)
-    df_housing = get_sheet(url,gid_housing)
-    df_savings = get_sheet(url,gid_savings)
-    df_expenses_detail = get_sheet(url,gid_expenses_detail)
+#df_transactions = get_sheet(url,gid_expenses)
+#df_income = get_sheet(url,gid_income)
+df_housing = get_sheet(url,gid_housing)
+df_savings = get_sheet(url,gid_savings)
+df_visa_transactions = get_sheet(url,gid_visa_transactions)
+df_chequing_transactions = get_sheet(url,gid_chequing_transactions)
+df_visa_mike_transactions = get_sheet(url,gid_visa_mike_transactions)
+df_other_transactions = get_sheet(url,gid_other_transactions)
 
-    return df_expenses, df_income, df_housing, df_savings, df_expenses_detail
+transactions_dfs = [df_visa_transactions,df_chequing_transactions, df_visa_mike_transactions,df_other_transactions]
+
+df_transactions = pd.concat(transactions_dfs)
+df_transactions = df_transactions[~df_transactions.Category.isin(['Housing','Transfer'])]
+df_expenses = make_table(df_transactions,value='Price')
+df_income = make_table(df_transactions,value='Refund')
 
 
 
+#print(df_expense_table)
 
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
@@ -61,7 +88,6 @@ app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 
 #######
 # AUTH : https://dash.plot.ly/authentication
-from credentials import *
 auth = dash_auth.BasicAuth(
     app,
     VALID_USERNAME_PASSWORD_PAIRS
@@ -70,14 +96,14 @@ auth = dash_auth.BasicAuth(
 
 
 def make_fig1():
-    df_expenses, df_income, df_housing, df_savings, df_expenses_detail = get_dfs()
-    df = pd.concat([df_expenses.sum(1),
+    df = pd.concat([df_expenses[start:limit].sum(1),
                 df_housing.sum(1),
                 df_savings.sum(1),
                 df_income.sum(1)],
                 axis=1)
-    df.columns = ['expenses','housing','savings','income']
-    df = df.loc[:limit].reset_index()
+    df = df.loc[start:limit].reset_index()
+    df.columns = ['Date','expenses','housing','savings','income']
+    
 
     data = [
         go.Bar(
@@ -116,34 +142,11 @@ def make_fig1():
 
 
 
-# df = df_expenses_detail.reset_index()
-# print(df)
-# data = [
-#     go.Scatter(
-# 	x=df['Date'],
-#         y=df['Misc'],
-#         name='Misc'
-#     ),
-#     go.Scatter(
-#         x=df['Date'],
-#         y=df['Netflix'],
-#         name='Netflix'
-#     ),
-# ]
-# layout = go.Layout(
-#     title = 'Expenses breakdown'
-#     )
-# fig2 = go.Figure(data=data,layout=layout)
-
-# This is a function so that it re-runs on each page load
-def serve_layout():
-    
-    return html.Div(children=[
+app.layout = html.Div(children=[
         html.H1(children='Houshold Finances'),
 
         html.A("Here\'s the raw spreadsheet", href=raw_url),
 
-        html.Div(id='all-data',children=json.dumps([x.to_json() for x in get_dfs()]),style={'display':'none'}),
         html.Div(id='current-cat-data',style={'display':'none'}),
         dcc.Graph(id='timeseries-graph',figure=make_fig1()),   
 
@@ -155,29 +158,22 @@ def serve_layout():
             n_intervals=0
         )
     ])
-app.layout = serve_layout
 
-# Update periodically
-# @app.callback(Output('timeseries-graph', 'figure'),
-#               [Input('interval-component', 'n_intervals')])
-# def update_fig1(n):
-#     print("updating fig1")
-#     return make_fig1()
+
+
 
 @app.callback([Output('detail-graph','figure'), Output('detail-graph','style')],
-              [Input('timeseries-graph','clickData'),Input('all-data','children')])
-def make_detail_fig(clickData,alldata_json):
+              [Input('timeseries-graph','clickData')])
+def make_detail_fig(clickData):
     print(f"clickData: {clickData}")
     date = clickData['points'][0]['x']
     cat  = clickData['points'][0]['curveNumber']
     print(date)
-    #df_expenses, df_income, df_housing, df_savings, df_expenses_detail = get_dfs()
-    f_expenses, df_income, df_housing, df_savings, df_expenses_detail = [pd.read_json(x) for x in json.loads(alldata_json)]
     
     
     if cat == 0:
         category = 'Expenses'
-        df = df_expenses_detail.loc[date]
+        df = df_expenses.loc[date]
     elif cat == 1:
         category = 'Housing'
         df = df_housing.loc[date]
@@ -211,12 +207,11 @@ def make_exp_fig(clickData,fig):
     subcat = clickData['points'][0]['x']
     category = fig['layout']['title']['text']  
     print(subcat)
-    df_expenses, df_income, df_housing, df_savings, df_expenses_detail = get_dfs()
     
-    print(df_expenses_detail.head())
+    
     
     if category == 'Expenses':
-        df = df_expenses_detail.loc[:,subcat]
+        df = df_expenses.loc[:,subcat]
         print(df.head())
     elif category == 'Housing':
         df = df_housing.loc[:,subcat]
@@ -226,7 +221,6 @@ def make_exp_fig(clickData,fig):
         df = df_income.loc[:,subcat]
     
     df = df.reset_index()
-    print(df.head())
     df.columns = ['Date','cost']
     data = [
         go.Scatter(
