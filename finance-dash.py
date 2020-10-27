@@ -37,8 +37,6 @@ colors = {'Expenses':'#1f77b4',
           'Income':'#d62728'
          }
 
-
-
 def make_dfs():
     
     print('Querying google doc')
@@ -52,9 +50,7 @@ def make_dfs():
     limit_str = limit.strftime('%Y-%m-%d')
     year = today.strftime('%Y')
 
-    #df_transactions = get_sheet(url,gid_expenses)
-    #df_income = get_sheet(url,gid_income)
-    df_assets = get_sheet(url,gid_assets).applymap(tofloat)
+
 
 
     df_visa_transactions = get_sheet(url,gid_visa_transactions)
@@ -67,24 +63,25 @@ def make_dfs():
     transactions_dfs = [df_visa_transactions,df_chequing_transactions, df_visa_mike_transactions,df_other_transactions]
 
     df_transactions = pd.concat(transactions_dfs)
-    df_transactions = df_transactions[~df_transactions.Category.isin(['Transfer'])].sort_index(ascending=False)
-    #df_expenses = make_table(df_transactions,value='Price')
-    #df_income = make_table(df_transactions,value='Refund')
+    df_transactions = df_transactions[~df_transactions['Label'].isin(['Transfer'])].sort_index(ascending=False)
+
     
      
-    xw = df_visa_transactions[['Categories','Group']].dropna().set_index('Categories')['Group'].to_dict()  
-    df_transactions['Group'] = df_transactions['Category'].map(xw)
+    xw = df_visa_transactions[['Labels','Categories']].dropna().set_index('Labels')['Categories'].to_dict()  
+    df_transactions['Category'] = df_transactions['Label'].map(xw)
     df_transactions['Net'] = df_transactions.fillna(0)['Price'] - df_transactions.fillna(0)['Refund']
     df_transactions['Month'] = pd.to_datetime(df_transactions.index.strftime('%Y-%m'))
-    df_monthly = df_transactions.pivot_table(values='Net',index='Month',columns=['Group','Category'],aggfunc='sum')
+    df_monthly = df_transactions.pivot_table(values='Net',index='Month',columns=['Category', 'Label'],aggfunc='sum')
     
-    
+    # add assets to monthly df
+    df_assets = get_sheet(url,gid_assets).applymap(tofloat)
+    cols = pd.MultiIndex.from_tuples([('Assets',x) for x in df_assets.columns], names=['Category', 'Label'])
+    df_monthly = pd.concat([df_monthly,pd.DataFrame(df_assets.values,columns=cols, index=df_assets.index)], axis=1)
     
     df_monthly.to_csv('data/df_monthly.csv')
     df_transactions.to_csv('data/df_transactions.csv', index=True)
-    df_assets.to_csv('data/df_assets.csv',index=True)
     
-    return df_monthly, df_transactions, df_assets
+    return df_monthly, df_transactions
   
 def get_dfs():
     
@@ -93,17 +90,14 @@ def get_dfs():
         df_monthly.index = pd.to_datetime(df_monthly.index)
         df_transactions = pd.read_csv('data/df_transactions.csv', index_col='Date')
         df_transactions.index = pd.to_datetime(df_transactions.index)
-        df_assets = pd.read_csv('data/df_assets.csv',index_col='Date')
-        df_assets.index = pd.to_datetime(df_assets.index)
         
-        return df_monthly, df_transactions, df_assets
+        return df_monthly, df_transactions
         
     except FileNotFoundError:
         return make_dfs()
-
-        
-
-
+    
+    
+    
 
 def tofloat(x):
     if type(x) == float:
@@ -118,7 +112,6 @@ def get_sheet(baseurl,gid,):
     df.index = pd.to_datetime(df.index)  
 
     return df
-
 
 make_dfs()
 
@@ -138,7 +131,7 @@ auth = dash_auth.BasicAuth(
 def make_datatable(df):
     df.index.name = 'Date'
     df = df.reset_index()
-    df = df[['Date','Purchase','Price','Refund','Category']]
+    df = df[['Date','Purchase','Price','Refund','Label']]
 
     table = dash_table.DataTable(
         id='transactions-table',
@@ -164,11 +157,12 @@ def make_datatable(df):
 
 def make_fig1():
 
-    df_monthly, df_transactions, df_assets = get_dfs()
-    df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings'])].sum(1)
+    df_monthly, df_transactions = get_dfs()
+    df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])].sum(1)
     df_housing = df_monthly['Housing'].sum(1)
     df_savings = df_monthly['Savings'].sum(1)
     df_income = df_monthly['Income'].sum(1)
+    df_assets = df_monthly['Assets']
     
     data = [
         go.Bar(
@@ -193,7 +187,8 @@ def make_fig1():
             x=df_income.index[:-1], 
             y=df_income.abs().values[:-1],
             name='Income',
-            marker_color=colors['Income']
+            marker_color=colors['Income'],
+            mode='lines+markers'
             )
         ]
     
@@ -203,19 +198,22 @@ def make_fig1():
             x=df_assets.index, 
             y=df_assets['Total Liquid'],
             name='Cash + TFSA',
-            marker_color='#9467bd'
+            marker_color='#9467bd',
+            mode='lines+markers'
             ),
         go.Scatter(
             x=df_assets.index, 
             y=df_assets['Home value']-df_assets['Mortgage balance'],
             name='Home Equity',
-            marker_color='#e377c2'
+            marker_color='#e377c2',
+            mode='lines+markers'
             ),
         go.Scatter(
             x=df_assets.index, 
             y=df_assets['Mike RRSP']+df_assets['Christa RRSP'],
             name='RRSP',
-            marker_color='#17becf'
+            marker_color='#17becf',
+            mode='lines+markers'
             ),
         
         ]
@@ -256,7 +254,7 @@ def make_fig1():
     return fig
 
 def make_expenses_fig(date_str='All'): 
-    df_monthly, df_transactions, df_assets = get_dfs()
+    df_monthly, df_transactions = get_dfs()
     df = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings'])]
 
     if date_str == 'All':
@@ -289,11 +287,11 @@ def make_cat_detail_fig(date_str,cat):
         data = go.Scatter(y=[1,2,3], x=[1,2,3])
         fig = go.Figure(data=data)
     else:
-        df_monthly, df_transactions, df_assets = get_dfs()
-        df = df_monthly.loc[date_str:date_str,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings'])]
+        df_monthly, df_transactions = get_dfs()
+        df = df_monthly.loc[date_str:date_str]#,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings'])]
         data = [go.Scatter(name=y,y=df.loc[:,cat].iloc[:,x], x=df.index) for x,y in 
                           zip(range(len(df.loc[:,cat].columns)), df.loc[:,cat].columns)]
-        fig = px.area(df.loc[:,'Food'])
+        fig = px.area(df.loc[:,cat])
 
     
     return fig
@@ -311,9 +309,9 @@ def make_layout():
     year = today.strftime('%Y')
     
     
-    #make_dfs()
-    df_monthly, df_transactions, df_assets = get_dfs()
-    df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings'])].sum(1)
+    make_dfs()
+    df_monthly, df_transactions = get_dfs()
+    df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])].sum(1)
     df_housing = df_monthly['Housing'].sum(1)
     df_savings = df_monthly['Savings'].sum(1)
     df_income = df_monthly['Income'].sum(1)
@@ -328,7 +326,7 @@ def make_layout():
                 dcc.Dropdown(
                     id="category-dropdown",
                     options=[
-                       {"label": col, "value": col} for col in ['All'] + sorted(set(df_transactions['Group'].dropna()))
+                       {"label": col, "value": col} for col in ['All'] + sorted(set(df_transactions['Category'].dropna()))
                     ],
                     value='All',
                 ),
@@ -367,7 +365,7 @@ def make_layout():
             dbc.Tab(label='Overview', children=[
  
           
-                html.Div(f"Savings last 12 months: ${ann_savings:,.2f}"),
+                html.Div(f"Avg monthly savings last 12 months: ${ann_savings/12:,.2f}"),
                 html.Div(f"Savings last month: ${curr_savings:,.2f}"),
 
                 dbc.Row([
@@ -438,17 +436,17 @@ def refresh_data(n_clicks):
                 Output('category-detail-div', 'className')],
               [Input('category-dropdown','value'),Input('month-dropdown','value')])
 def update_datatable(cat,month):
-    df_monthly, df_transactions, df_assets = get_dfs()
+    df_monthly, df_transactions = get_dfs()
     
     df = df_transactions.copy()
     if month != 'All':
         df = df[month]
     
     if cat != 'All':
-        df = df[df['Group']==cat]
+        df = df[df['Category']==cat]
 
     df = df.reset_index()   
-    data = df[['Date','Purchase','Price','Refund','Category']].reset_index().to_dict('records')
+    data = df[['Date','Purchase','Price','Refund','Label']].reset_index().to_dict('records')
     className = 'd-none' if cat=='All' else ''
     return data,make_cat_detail_fig(None,cat), make_expenses_fig(month), className
 
