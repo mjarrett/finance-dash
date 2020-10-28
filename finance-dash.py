@@ -102,7 +102,7 @@ def get_dfs():
 def tofloat(x):
     if type(x) == float:
         return x
-    x = re.sub("[^0-9\.]", "", x)
+    x = re.sub("[^0-9\.\-]", "", x)
     return float(x)
 
 def get_sheet(baseurl,gid,):
@@ -128,13 +128,13 @@ auth = dash_auth.BasicAuth(
 #######
 
 
-def make_datatable(df):
+def make_datatable(df,tabid):
     df.index.name = 'Date'
     df = df.reset_index()
     df = df[['Date','Purchase','Price','Refund','Label']]
 
     table = dash_table.DataTable(
-        id='transactions-table',
+        id=tabid,
         columns=[{"name": i, "id": i} for i in df.columns],
         data=df.reset_index().to_dict('records'),
         editable=False,
@@ -203,7 +203,7 @@ def make_fig1():
             ),
         go.Scatter(
             x=df_assets.index, 
-            y=df_assets['Home value']-df_assets['Mortgage balance'],
+            y=df_assets['Home value']+df_assets['Mortgage balance'],
             name='Home Equity',
             marker_color='#e377c2',
             mode='lines+markers'
@@ -255,7 +255,7 @@ def make_fig1():
 
 def make_expenses_fig(date_str='All'): 
     df_monthly, df_transactions = get_dfs()
-    df = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings'])]
+    df = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
 
     if date_str == 'All':
         fig = go.Figure(data=[
@@ -274,25 +274,41 @@ def make_expenses_fig(date_str='All'):
 
 def make_cat_detail_fig(date_str,cat):
 
-#     if cat == 'All':
-#         return None
-    
-#     if date_str == 'All':
-#         date_str = None
-
-
-    
-
     if cat == 'All':
         data = go.Scatter(y=[1,2,3], x=[1,2,3])
         fig = go.Figure(data=data)
     else:
         df_monthly, df_transactions = get_dfs()
-        df = df_monthly.loc[date_str:date_str]#,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings'])]
-        data = [go.Scatter(name=y,y=df.loc[:,cat].iloc[:,x], x=df.index) for x,y in 
-                          zip(range(len(df.loc[:,cat].columns)), df.loc[:,cat].columns)]
+        df = df_monthly.iloc[:-1]#,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings'])]
+#         data = [go.Scatter(name=y,y=df.loc[:,cat].iloc[:,x], x=df.index) for x,y in 
+#                           zip(range(len(df.loc[:,cat].columns)), df.loc[:,cat].columns)]
+        print(df)
         fig = px.area(df.loc[:,cat])
+        fig.update_layout(
+            barmode = 'stack',
+            dragmode='pan',
+#             height=700, #px
+#             title = f'Budget'
+        )
+        fig.update_xaxes(range=[df_monthly.index[-12],df_monthly.index[-1]])
+        fig.update_yaxes(fixedrange=True)
+    
+    return fig
 
+def make_assets_detail_fig():
+
+    df_monthly, df_transactions = get_dfs()
+    df_monthly[('Assets','Home Equity')] = df_monthly['Assets']['Home value'] + df_monthly['Assets']['Mortgage balance']
+    cols =  [col for col in df_monthly['Assets'].columns if col not in ['Total Liquid','Net Worth','Home value','Mortgage balance']]
+    fig = px.area(df_monthly.loc['2020-04-01':]['Assets'][cols])
+    fig.update_layout(
+        barmode = 'stack',
+        dragmode='pan',
+#             height=700, #px
+#             title = f'Budget'
+    )
+    fig.update_xaxes(range=[df_monthly.index[-12],df_monthly.index[-1]])
+    fig.update_yaxes(fixedrange=True)
     
     return fig
             
@@ -308,16 +324,15 @@ def make_layout():
     limit_str = limit.strftime('%Y-%m-%d')
     year = today.strftime('%Y')
     
-    
-    make_dfs()
     df_monthly, df_transactions = get_dfs()
-    df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])].sum(1)
-    df_housing = df_monthly['Housing'].sum(1)
-    df_savings = df_monthly['Savings'].sum(1)
-    df_income = df_monthly['Income'].sum(1)
-    df_cashflow = -df_income-df_housing-df_expenses
+    df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
+    df_housing = df_monthly['Housing']
+    df_savings = df_monthly['Savings']
+    df_income = df_monthly['Income']
+    df_cashflow = -df_income.sum(1)-df_housing.sum(1)-df_expenses.sum(1)
     curr_savings = df_cashflow.iloc[-2]
     ann_savings = df_cashflow.iloc[-13:-1].sum()
+    print(df_expenses.columns)
     controls = dbc.Card(
     [
         dbc.FormGroup(
@@ -326,7 +341,8 @@ def make_layout():
                 dcc.Dropdown(
                     id="category-dropdown",
                     options=[
-                       {"label": col, "value": col} for col in ['All'] + sorted(set(df_transactions['Category'].dropna()))
+                       {"label": col, "value": col} for col in ['All'] + 
+                        sorted(set(df_expenses.columns.get_level_values(0)))
                     ],
                     value='All',
                 ),
@@ -345,24 +361,9 @@ def make_layout():
 
     ],
     body=True,
-)
+    )
     
-    
-    layout =  dbc.Container(children=[
-        html.H1(children='Houshold Finances'),
-        dbc.Row([
-
-            dbc.Col([
-
-                html.A("Here\'s the raw spreadsheet", href=raw_url),
-            ], width=12),
-            dbc.Col([
-                dbc.Button("Refresh data", size="md", className="mr-1", id='refresh-button'),
-            ], width=12),
-
-        ]),
-        dbc.Tabs([
-            dbc.Tab(label='Overview', children=[
+    tab_overview = dbc.Tab(label='Overview', children=[
  
           
                 html.Div(f"Avg monthly savings last 12 months: ${ann_savings/12:,.2f}"),
@@ -384,9 +385,9 @@ def make_layout():
                         n_intervals=0
                     ),
                 ]),
-            ]),
-            
-            dbc.Tab(label='Expenses', children=[
+            ])
+    
+    tab_expenses = dbc.Tab(label='Expenses', children=[
         
                 dbc.Row([
                     html.H3("Transactions"),
@@ -395,18 +396,85 @@ def make_layout():
                     ], width=12),
                     dbc.Col([
                         dcc.Graph(id='expenses-avg', figure=make_expenses_fig()),
-                    ], width=12),
+                    ], width=6),
                     dbc.Col([
-                        html.Div(id='category-detail-div', className='d-none', children=[
-                            dcc.Graph(id='category-detail'),# figure=make_cat_detail_fig(None,'Food')),
+                        html.Div(id='expenses-detail-div', className='d-none', children=[
+                            dcc.Graph(id='expenses-detail'),# figure=make_cat_detail_fig(None,'Food')),
+                        ]),
+                    ], width=6),
+
+                    dbc.Col([
+                        make_datatable(df_transactions, 'expenses-table')
+                    ], width=12)
+                ])
+            ])
+    
+    tab_savings = dbc.Tab(label='Savings', children=[
+        dbc.Row([
+                    html.H3("Savings"),
+
+
+                    dbc.Col([
+                        html.Div(id='savings-detail-div', className='', children=[
+                            dcc.Graph(id='savings-detail', figure=make_cat_detail_fig(None,'Savings')),
                         ]),
                     ], width=12),
 
                     dbc.Col([
-                        make_datatable(df_transactions)
+                        make_datatable(df_transactions[df_transactions['Category']=='Savings'], 'savings-table')
                     ], width=12)
                 ])
-            ]),
+    ])
+    
+    tab_housing = dbc.Tab(label='Housing', children=[
+        dbc.Row([
+                    html.H3("Housing"),
+
+
+                    dbc.Col([
+                        html.Div(id='housing-detail-div', className='', children=[
+                            dcc.Graph(id='housing-detail', figure=make_cat_detail_fig(None,'Housing')),
+                        ]),
+                    ], width=12),
+
+                    dbc.Col([
+                        make_datatable(df_transactions[df_transactions['Category']=='Housing'], 'housing-table')
+                    ], width=12)
+                ])
+    ])    
+    tab_assets = dbc.Tab(label='Assets', children=[
+        dbc.Row([
+                    html.H3("Assets"),
+
+                    dbc.Col([
+                        html.Div(id='assets-detail-div', className='', children=[
+                            dcc.Graph(id='assets-detail', figure=make_assets_detail_fig()),
+                        ]),
+                    ], width=12),
+                ])
+    ])
+    
+    layout =  dbc.Container(children=[
+        html.H1(children='Houshold Finances'),
+        dbc.Row([
+
+            dbc.Col([
+
+                html.A("Here\'s the raw spreadsheet", href=raw_url, target="_blank"),
+            ], width=12),
+            dbc.Col([
+                dbc.Button("Refresh data", size="md", className="mr-1", id='refresh-button'),
+            ], width=12),
+
+        ]),
+        dbc.Tabs([
+            tab_overview,
+            tab_expenses,
+            tab_savings,
+            tab_housing,
+            tab_assets,
+            
+            
         ])
     ])
     
@@ -431,9 +499,9 @@ def refresh_data(n_clicks):
     else:
         raise PreventUpdate 
 
-# Update datatable
-@app.callback([Output('transactions-table','data'), Output('category-detail', 'figure'), Output('expenses-avg', 'figure'), 
-                Output('category-detail-div', 'className')],
+# Update expenses tab
+@app.callback([Output('expenses-table','data'), Output('expenses-detail', 'figure'), Output('expenses-avg', 'figure'), 
+                Output('expenses-detail-div', 'className')],
               [Input('category-dropdown','value'),Input('month-dropdown','value')])
 def update_datatable(cat,month):
     df_monthly, df_transactions = get_dfs()
@@ -450,83 +518,6 @@ def update_datatable(cat,month):
     className = 'd-none' if cat=='All' else ''
     return data,make_cat_detail_fig(None,cat), make_expenses_fig(month), className
 
-# @app.callback([Output('detail-graph','figure'), Output('detail-graph','style')],
-#               [Input('timeseries-graph','clickData')])
-# def make_detail_fig(clickData):
-    
-#     if clickData is None:
-#         raise PreventUpdate
-        
-        
-#     sdf, df_transactions, df_expenses, df_income, df_housing, df_assets = get_dfs()
-        
-#     date = clickData['points'][0]['x']
-#     cat  = clickData['points'][0]['curveNumber']
-    
-    
-#     if cat == 0:
-#         category = 'Expenses'
-#         df = df_expenses.loc[date]
-#     elif cat == 1:
-#         category = 'Housing'
-#         df = df_housing.loc[date]
-#     elif cat == 2:
-#         category = 'Savings'
-#         df = df_savings.loc[date]
-#     elif cat == 3:
-#         category = 'Income'
-#         df = df_income.loc[date]
-        
-#     df = df.reset_index()
-#     df.columns = ['categories','money']
-#     data = [
-#         go.Bar(
-#             x = df['categories'],
-#             y = df['money'],
-#             name='Expenses',
-#             marker_color=colors[category]
-#             )
-#         ]
-    
-#     layout = go.Layout(title = f'{category}')  
-#     fig = go.Figure(data=data,layout=layout)
-    
-#     return fig, {'display': 'inline'}
-
-# @app.callback([Output('expense-timeseries','figure'), Output('expense-timeseries','style')],
-#               [Input('detail-graph','clickData'),Input('detail-graph','figure')])
-# def make_exp_fig(clickData,fig):
-    
-#     sdf, df_transactions, df_expenses, df_income, df_housing, df_assets = get_dfs()
-    
-#     subcat = clickData['points'][0]['x']
-#     category = fig['layout']['title']['text']  
-    
-    
-    
-#     if category == 'Expenses':
-#         df = df_expenses.loc[:,subcat]
-#     elif category == 'Housing':
-#         df = df_housing.loc[:,subcat]
-#     elif category == 'Savings':
-#         df = df_savings.loc[:,subcat]
-#     elif category == 'Income':
-#         df = df_income.loc[:,subcat]
-    
-#     df = df.reset_index()
-#     df.columns = ['Date','cost']
-#     data = [
-#         go.Scatter(
-#             x=df['Date'], 
-#             y=df['cost'],
-#             name=subcat,
-#             marker_color=colors[category]
-#             )
-#         ]
-    
-#     layout = go.Layout(title = f'{subcat}')
-#     fig = go.Figure(data=data,layout=layout)
-#     return fig, {'display': 'inline'}
 
 
 if __name__ == '__main__':
