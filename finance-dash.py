@@ -332,7 +332,6 @@ def make_layout():
     df_cashflow = -df_income.sum(1)-df_housing.sum(1)-df_expenses.sum(1)
     curr_savings = df_cashflow.iloc[-2]
     ann_savings = df_cashflow.iloc[-13:-1].sum()
-    print(df_expenses.columns)
     controls = dbc.Card(
     [
         dbc.FormGroup(
@@ -442,6 +441,11 @@ def make_layout():
                     ], width=12)
                 ])
     ])    
+
+    df_assets = df_monthly.loc['2020-04-01':]['Assets']
+    df_assets['Month'] = df_assets.index.strftime('%Y-%m')
+    df_assets = df_assets[['Month'] + [col for col in df_assets.columns if col!='Month']]
+    
     tab_assets = dbc.Tab(label='Assets', children=[
         dbc.Row([
                     html.H3("Assets"),
@@ -451,7 +455,27 @@ def make_layout():
                             dcc.Graph(id='assets-detail', figure=make_assets_detail_fig()),
                         ]),
                     ], width=12),
-                ])
+                ]),
+        dbc.Row([
+
+            dash_table.DataTable(
+                id='assets-table',
+                columns=[{"name": i, "id": i} for i in df_assets.columns],
+                data=df_assets.iloc[::-1].to_dict('records'),
+#                 editable=False,
+#                 filter_action="native",
+#                 sort_action="native",
+#                 sort_mode="multi",
+#                 column_selectable="single",
+#                 row_selectable="multi",
+#                 row_deletable=False,
+#                 selected_columns=[],
+#                 selected_rows=[],
+#                 page_action="native",
+#                 page_current= 0,
+#                 #page_size= 10,
+                )
+        ])
     ])
     
     layout =  dbc.Container(children=[
@@ -521,4 +545,4 @@ def update_datatable(cat,month):
 
 
 if __name__ == '__main__':
-    app.run_server(debug=True,host='0.0.0.0',port=8050)
+    app.run_server(debug=False,host='0.0.0.0',port=8050)
