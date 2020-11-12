@@ -136,7 +136,9 @@ auth = dash_auth.BasicAuth(
 def make_datatable(df,tabid):
     df.index.name = 'Date'
     df = df.reset_index()
-    df = df[['Date','Purchase','Price','Refund','Label']]
+    df['Amount'] = df['Net'].map(lambda x: f"${x:,.2f}")
+
+    df = df[['Date','Purchase','Amount','Label']]
 
     table = dash_table.DataTable(
         id=tabid,
@@ -360,6 +362,7 @@ def make_layout():
     start_str = start.strftime('%Y-%m-%d')
     limit_str = limit.strftime('%Y-%m-%d')
     year = today.strftime('%Y')
+    month = today.strftime('%Y-%m')
     
     df_monthly, df_transactions = get_dfs()
     df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
@@ -390,7 +393,7 @@ def make_layout():
                 dcc.Dropdown(
                     id="month-dropdown",
                     options=[{"label": m.strftime('%b %Y'), "value": m.strftime('%Y-%m')} for m in df_monthly.index] + [{'label':'All','value':'All'}],
-                    value='All',
+                    value=df_monthly.index[-2].strftime('%Y-%m'),
                 ),
             ]
         ),
@@ -425,23 +428,29 @@ def make_layout():
     
     tab_expenses = dbc.Tab(label='Expenses', children=[
                 html.H3("Expenses"),
-                dbc.Row([
+                dbc.Row(justify="center", children=[
                     
-                    dbc.Col([
+                    dbc.Col( children=[
                         controls
                     ], width=6),
-                    dbc.Col([
-                        dcc.Graph(id='expenses-avg', figure=make_expenses_fig(),
+                ]),
+                dbc.Row(justify="center", children=[
+                    dbc.Col(children=[
+                        dcc.Graph(id='expenses-avg', figure=make_expenses_fig(month),
                                   config={'displayModeBar': False}
                                  ),
                     ], width=6),
-                    
-                    dbc.Col(id='expenses-detail-div', children=make_cat_detail_div(df_monthly,None,None), width=12),
-
+                ]),
+                dbc.Row(justify="center", children=[    
+                    dbc.Col(id='expenses-detail-div', children=make_cat_detail_div(df_monthly,None,None), width=6),
+                ]),
+        
+                dbc.Row(justify="center", children=[  
                     dbc.Col([
                         html.H3("Transactions"),
                         make_datatable(df_transactions, 'expenses-table')
                     ], width=12)
+                
                 ])
             ])
     
@@ -517,7 +526,7 @@ def make_layout():
             dash_table.DataTable(
                 id='assets-table',
                 columns=[{"name": i, "id": i} for i in df_assets.columns],
-                data=df_assets.iloc[::-1].to_dict('records'),
+                data=df_assets.iloc[::-1].applymap(lambda x: f"${x:,.2f}" if type(x)==float else x).to_dict('records'),
 #                 editable=False,
 #                 filter_action="native",
 #                 sort_action="native",
@@ -596,8 +605,9 @@ def update_datatable(cat,month):
     if cat != 'All':
         df = df[df['Category']==cat]
 
-    df = df.reset_index()   
-    data = df[['Date','Purchase','Price','Refund','Label']].reset_index().to_dict('records')
+    df = df.reset_index()  
+    df['Amount'] = df['Net'].map(lambda x: f"${x:,.2f}")
+    data = df[['Date','Purchase','Amount','Label']].reset_index().to_dict('records')
     className = 'd-none' if cat=='All' else ''
     return data, make_expenses_fig(month), make_cat_detail_div(df_monthly,month,cat)
 
