@@ -372,6 +372,8 @@ def make_layout():
     df_cashflow = df_income.sum(1)-df_housing.sum(1)-df_expenses.sum(1)
     curr_savings = df_cashflow.iloc[-2]
     ann_savings = df_cashflow.iloc[-13:-1].sum()
+    
+    
     controls = dbc.Card(
     [
         dbc.FormGroup(
@@ -573,9 +575,12 @@ def make_layout():
     return layout
 
 # wrap the layout in the content div so i can refresh everything with a callback
-app.layout = html.Div([
-    html.Div(id='content', children=make_layout())
-])
+def layout():
+    return html.Div([
+               html.Div(id='content', children=make_layout())
+           ])
+
+app.layout = layout
 
 
 
@@ -590,6 +595,8 @@ def refresh_data(n_clicks):
     
     else:
         raise PreventUpdate 
+        # This is a workaround so that changes to the spreadsheet will be included on page load
+        #return make_layout()
 
 # Update expenses tab
 @app.callback([Output('expenses-table','data'), Output('expenses-avg', 'figure'), 
