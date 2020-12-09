@@ -83,6 +83,18 @@ def make_dfs():
     cols = pd.MultiIndex.from_tuples([('Assets',x) for x in df_assets.columns], names=['Category', 'Label'])
     df_monthly = pd.concat([df_monthly,pd.DataFrame(df_assets.values,columns=cols, index=df_assets.index)], axis=1)
     
+    
+    
+    # add interest on assets to monthly df
+    df = pd.DataFrame()
+    investment_accounts = ['Mike TFSA','Mike RRSP','Christa TFSA','Christa RRSP','Mike Other Inv',' Christa Other Inv']
+    df['Assets'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1)
+    df['Contributions'] = df_monthly['Savings'].sum(1)
+    df['Interest'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1).diff()
+    df = df.loc['2020-05-01':].iloc[:-1]
+    df_monthly[('Income','Investment Interest')] = df['Interest']
+    
+    
     df_monthly.to_csv('data/df_monthly.csv')
     df_transactions.to_csv('data/df_transactions.csv', index=True)
     
@@ -373,6 +385,10 @@ def make_layout():
     curr_savings = df_cashflow.iloc[-2]
     ann_savings = df_cashflow.iloc[-13:-1].sum()
     
+    # Compute interest on investiment accounts (increase minus contributions) since May 2020
+
+    curr_interest = df_monthly[('Income','Investment Interest')].iloc[-2]
+    ann_interest = df_monthly[('Income','Investment Interest')].iloc[-12:].sum()
     
     controls = dbc.Card(
     [
@@ -405,11 +421,10 @@ def make_layout():
     )
     
     tab_overview = dbc.Tab(label='Overview', children=[
- 
-          
-                html.Div(f"Avg monthly savings last 12 months: ${ann_savings/12:,.2f}"),
-                html.Div(f"Savings last month: ${curr_savings:,.2f}"),
 
+                dbc.Col(children=f"Avg monthly savings last 12 months: ${ann_savings/12:,.2f}", width=12),
+                dbc.Col(f"Savings last month: ${curr_savings:,.2f}", width=12),
+        
                 dbc.Row([
                     dbc.Col([
                     html.Div(id='current-cat-data',style={'display':'none'}),
@@ -461,6 +476,9 @@ def make_layout():
                     html.H3("Savings"),
 
 
+
+                    
+            
                     dbc.Col([
                         html.Div(id='savings-detail-div', className='', children=[
                             dcc.Graph(id='savings-detail', figure=make_cat_detail_fig(df_monthly,None,'Savings')),
@@ -516,7 +534,9 @@ def make_layout():
     tab_assets = dbc.Tab(label='Assets', children=[
         dbc.Row([
                     html.H3("Assets"),
-
+                    dbc.Col(f"Total interest accumulated last 12 months: ${ann_interest:,.2f}", width=12),
+                    dbc.Col(f"Interest last month: ${curr_interest:,.2f}", width=12),
+            
                     dbc.Col([
                         html.Div(id='assets-detail-div', className='', children=[
                             dcc.Graph(id='assets-detail', figure=make_assets_detail_fig()),
@@ -589,14 +609,15 @@ app.layout = layout
 @app.callback(Output('content', 'children'),
               [Input('refresh-button','n_clicks')])
 def refresh_data(n_clicks):
+    print("****",n_clicks)
     if n_clicks is not None:
+        print('refresh data callback')
         make_dfs()
         return make_layout()
     
     else:
         raise PreventUpdate 
-        # This is a workaround so that changes to the spreadsheet will be included on page load
-        #return make_layout()
+
 
 # Update expenses tab
 @app.callback([Output('expenses-table','data'), Output('expenses-avg', 'figure'), 
