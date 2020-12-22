@@ -87,7 +87,7 @@ def make_dfs():
     
     # add interest on assets to monthly df
     df = pd.DataFrame()
-    investment_accounts = ['Mike TFSA','Mike RRSP','Christa TFSA','Christa RRSP','Mike Other Inv',' Christa Other Inv']
+    investment_accounts = ['Mike TFSA','Mike RRSP','Christa TFSA','Christa RRSP','Mike Other Inv','Christa Other Inv']
     df['Assets'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1)
     df['Contributions'] = df_monthly['Savings'].sum(1)
     df['Interest'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1).diff()
@@ -136,6 +136,7 @@ external_stylesheets = [dbc.themes.BOOTSTRAP]
 
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 app.title = 'Home Finances'
+server = app.server
 #######
 # AUTH : https://dash.plot.ly/authentication
 auth = dash_auth.BasicAuth(
@@ -642,4 +643,4 @@ def update_datatable(cat,month):
 
 
 if __name__ == '__main__':
-    app.run_server(debug=False,host='0.0.0.0',port=8050)
+    app.run_server(debug=True)
