@@ -11,13 +11,13 @@ from dash.dependencies import Input, Output
 import dash_table
 from dash.exceptions import PreventUpdate 
 
-from credentials import *
-
 import pandas as pd
 import datetime as dt
 import json
 import numpy as np
 import re
+import os
+
 
 # colors = [
 #     '#1f77b4',  # muted blue
@@ -37,8 +37,40 @@ colors = {'Expenses':'#1f77b4',
           'Income':'#d62728'
          }
 
+
+env_vars = ['USER1',
+'PW1',
+'USER2',
+'PW2',
+'raw_url',
+'url',
+'gid_summary',
+'gid_income',
+'gid_visa_transactions',
+'gid_chequing_transactions',
+'gid_visa_mike_transactions',
+'gid_other_transactions',
+'gid_housing',
+'gid_savings',
+'gid_savings_totals',
+'gid_assets']
+env = {k:os.environ[k] for k in env_vars}
+
+
+
+VALID_USERNAME_PASSWORD_PAIRS = {
+    env['USER1']: env['PW1'],
+    env['USER2']: env['PW2']
+}
+
+
+
+
+
 def make_dfs():
-    
+    if not os.path.exists('data'):
+        os.makedirs('data')
+        
     print('Querying google doc')
 
     today = dt.datetime.now()
@@ -53,10 +85,10 @@ def make_dfs():
 
 
 
-    df_visa_transactions = get_sheet(url,gid_visa_transactions)
-    df_chequing_transactions = get_sheet(url,gid_chequing_transactions)
-    df_visa_mike_transactions = get_sheet(url,gid_visa_mike_transactions)
-    df_other_transactions = get_sheet(url,gid_other_transactions)
+    df_visa_transactions = get_sheet(env['url'],env['gid_visa_transactions'])
+    df_chequing_transactions = get_sheet(env['url'],env['gid_chequing_transactions'])
+    df_visa_mike_transactions = get_sheet(env['url'],env['gid_visa_mike_transactions'])
+    df_other_transactions = get_sheet(env['url'],env['gid_other_transactions'])
 
     
     
@@ -79,7 +111,7 @@ def make_dfs():
     
     
     # add assets to monthly df
-    df_assets = get_sheet(url,gid_assets).applymap(tofloat)
+    df_assets = get_sheet(env['url'],env['gid_assets']).applymap(tofloat)
     cols = pd.MultiIndex.from_tuples([('Assets',x) for x in df_assets.columns], names=['Category', 'Label'])
     df_monthly = pd.concat([df_monthly,pd.DataFrame(df_assets.values,columns=cols, index=df_assets.index)], axis=1)
     
@@ -575,7 +607,7 @@ def make_layout():
 
             dbc.Col([
 
-                html.A("Here\'s the raw spreadsheet", href=raw_url, target="_blank"),
+                html.A("Here\'s the raw spreadsheet", href=env['raw_url'], target="_blank"),
             ], width=12),
             dbc.Col([
                 dbc.Button("Refresh data", size="md", className="mr-1", id='refresh-button'),
