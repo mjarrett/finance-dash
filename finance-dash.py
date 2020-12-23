@@ -142,7 +142,8 @@ def get_dfs():
         
         return df_monthly, df_transactions
         
-    except FileNotFoundError:
+    except Exception as e:
+        print(e)
         return make_dfs()
     
     
