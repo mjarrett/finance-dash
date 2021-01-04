@@ -12,6 +12,7 @@ import dash_table
 from dash.exceptions import PreventUpdate 
 
 import pandas as pd
+import paramiko
 import datetime as dt
 import json
 import numpy as np
@@ -53,7 +54,9 @@ env_vars = ['USER1',
 'gid_housing',
 'gid_savings',
 'gid_savings_totals',
-'gid_assets']
+'gid_assets',
+'NURSE_USER',
+'NURSE_PW']
 env = {k:os.environ[k] for k in env_vars}
 
 
@@ -68,8 +71,7 @@ VALID_USERNAME_PASSWORD_PAIRS = {
 
 
 def make_dfs():
-    if not os.path.exists('data'):
-        os.makedirs('data')
+    
         
     print('Querying google doc')
 
@@ -127,24 +129,65 @@ def make_dfs():
     df_monthly[('Income','Investment Interest')] = df['Interest']
     
     
-    df_monthly.to_csv('data/df_monthly.csv')
-    df_transactions.to_csv('data/df_transactions.csv', index=True)
+    try: #save to NURSE
+        print('Saving to NURSE')
+        ssh=paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect('home.mikejarrett.ca',22,env['NURSE_USER'],env['NURSE_PW'])
+        sftp_client = ssh.open_sftp()
+        monthly_file = sftp_client.open('/home/msj/finance-dash/data/df_monthly.csv','w')
+        transactions_file = sftp_client.open('/home/msj/finance-dash/data/df_transactions.csv','w')
+        df_monthly.to_csv(monthly_file)
+        df_transactions.to_csv(transactions_file, index=True)
+        monthly_file.close()
+        transactions_file.close()
+        print('Saved to NURSE')
+        
+    except: 
+        pass
     
+    finally: # save local regardless
+        if not os.path.exists('data'):
+            os.makedirs('data')
+        df_monthly.to_csv('data/df_monthly.csv')
+        df_transactions.to_csv('data/df_transactions.csv', index=True)
+        print('Saved locally')
     return df_monthly, df_transactions
   
 def get_dfs():
+    # First try local read. If that fails, try to read from NURSE. if that fails, make_dfs()
     
     try:
         df_monthly = pd.read_csv('data/df_monthly.csv', header=[0,1], index_col=0)
         df_monthly.index = pd.to_datetime(df_monthly.index)
         df_transactions = pd.read_csv('data/df_transactions.csv', index_col='Date')
         df_transactions.index = pd.to_datetime(df_transactions.index)
-        
+        print('files read locally')
         return df_monthly, df_transactions
+    
+    except:
         
-    except Exception as e:
-        print(e)
-        return make_dfs()
+        try:
+            print('reading file from NURSE')
+            ssh=paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect('home.mikejarrett.ca',22,env['NURSE_USER'],env['NURSE_PW'])
+            sftp_client = ssh.open_sftp()
+            monthly_file = sftp_client.open('/home/msj/finance-dash/data/df_monthly.csv')
+            transactions_file = sftp_client.open('/home/msj/finance-dash/data/df_transactions.csv')
+            df_monthly = pd.read_csv(monthly_file, header=[0,1], index_col=0)
+            df_monthly.index = pd.to_datetime(df_monthly.index)
+            df_transactions = pd.read_csv(transactions_file, index_col='Date')
+            df_transactions.index = pd.to_datetime(df_transactions.index)
+            monthly_file.close()
+            transactions_file.close()
+            print('files read from NURSE')
+            return df_monthly, df_transactions
+        except Exception as e:
+            print(e)
+            return make_dfs()
+    
+        
     
     
     
