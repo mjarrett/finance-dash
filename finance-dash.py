@@ -182,6 +182,13 @@ def get_dfs():
             monthly_file.close()
             transactions_file.close()
             print('files read from NURSE')
+            
+            df_monthly.to_csv(monthly_file)
+            df_transactions.to_csv(transactions_file, index=True)
+            monthly_file.close()
+            transactions_file.close()
+            print('files saved locally')
+            
             return df_monthly, df_transactions
         except Exception as e:
             print(e)
