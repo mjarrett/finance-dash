@@ -206,7 +206,7 @@ def get_sheet(baseurl,gid,):
 
     return df
 
-make_dfs()
+#make_dfs()
 
 external_stylesheets = [dbc.themes.BOOTSTRAP]
 
