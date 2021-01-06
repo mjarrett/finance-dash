@@ -134,7 +134,7 @@ def make_dfs():
                   data=df_monthly.to_csv().encode('utf-8'))
 
     r = requests.post(f"{env['DATA_API_URL']}{env['DATA_API_KEY']}/finances/transactions", 
-                  data=df_transactions.to_csv().encode('utf-8'), headers=headers)
+                  data=df_transactions.to_csv().encode('utf-8'))
     
     
     
