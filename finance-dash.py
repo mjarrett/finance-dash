@@ -124,7 +124,7 @@ def make_dfs():
     investment_accounts = ['Mike TFSA','Mike RRSP','Christa TFSA','Christa RRSP','Mike Other Inv','Christa Other Inv']
     df['Assets'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1)
     df['Contributions'] = df_monthly['Savings'].sum(1)
-    df['Interest'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1).diff()
+    df['Interest'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1).diff() - df['Contributions'].shift(1)
     df = df.loc['2020-05-01':].iloc[:-1]
     df_monthly[('Income','Investment Interest')] = df['Interest']
     
@@ -354,7 +354,7 @@ def make_cat_detail_fig(df_monthly,date_str,cat):
 def make_assets_detail_fig():
 
     df_monthly = get_summary()
-    df_monthly[('Assets','Home Equity')] = df_monthly['Assets']['Home value'] + df_monthly['Assets']['Mortgage balance']
+    df_monthly[('Assets','Home Equity')] = df_monthly['Assets']['Home value'] - df_monthly['Assets']['Mortgage balance']
     cols =  [col for col in df_monthly['Assets'].columns if col not in ['Total Liquid','Net Worth','Home value','Mortgage balance']]
     fig = px.area(df_monthly.loc['2020-04-01':]['Assets'][cols])
     fig.update_layout(
