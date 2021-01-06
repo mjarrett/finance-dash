@@ -214,9 +214,8 @@ def make_datatable(df,tabid):
  
     
 
-def make_fig1():
+def make_fig1(df_monthly):
 
-    df_monthly = get_summary()   
     df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])].sum(1)
     df_housing = df_monthly['Housing'].sum(1)
     df_savings = df_monthly['Savings'].sum(1)
@@ -312,8 +311,7 @@ def make_fig1():
 
     return fig
 
-def make_expenses_fig(date_str='All'): 
-    df_monthly = get_summary()
+def make_expenses_fig(df_monthly,date_str='All'): 
     df = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
 
     if date_str == 'All':
@@ -351,10 +349,9 @@ def make_cat_detail_fig(df_monthly,date_str,cat):
     
     return fig
 
-def make_assets_detail_fig():
+def make_assets_detail_fig(df_monthly):
 
-    df_monthly = get_summary()
-    df_monthly[('Assets','Home Equity')] = df_monthly['Assets']['Home value'] - df_monthly['Assets']['Mortgage balance']
+    df_monthly[('Assets','Home Equity')] = df_monthly['Assets']['Home value'] + df_monthly['Assets']['Mortgage balance']
     cols =  [col for col in df_monthly['Assets'].columns if col not in ['Total Liquid','Net Worth','Home value','Mortgage balance']]
     fig = px.area(df_monthly.loc['2020-04-01':]['Assets'][cols])
     fig.update_layout(
@@ -469,7 +466,7 @@ def make_layout():
                 dbc.Row([
                     dbc.Col([
                     html.Div(id='current-cat-data',style={'display':'none'}),
-                    dcc.Graph(id='timeseries-graph',figure=make_fig1()),  
+                    dcc.Graph(id='timeseries-graph',figure=make_fig1(df_monthly)),  
                     ], width=12),
                 ]),
 
@@ -494,7 +491,7 @@ def make_layout():
                 ]),
                 dbc.Row(justify="center", children=[
                     dbc.Col(children=[
-                        dcc.Graph(id='expenses-avg', figure=make_expenses_fig(month),
+                        dcc.Graph(id='expenses-avg', figure=make_expenses_fig(df_monthly,month),
                                   config={'displayModeBar': False}
                                  ),
                     ], width=6),
@@ -580,7 +577,7 @@ def make_layout():
             
                     dbc.Col([
                         html.Div(id='assets-detail-div', className='', children=[
-                            dcc.Graph(id='assets-detail', figure=make_assets_detail_fig()),
+                            dcc.Graph(id='assets-detail', figure=make_assets_detail_fig(df_monthly)),
                         ]),
                     ], width=12),
                 ]),
@@ -650,7 +647,6 @@ app.layout = layout
 @app.callback(Output('content', 'children'),
               [Input('refresh-button','n_clicks')])
 def refresh_data(n_clicks):
-    print("****",n_clicks)
     if n_clicks is not None:
         print('refresh data callback')
         make_dfs()
@@ -679,7 +675,7 @@ def update_datatable(cat,month):
     df['Amount'] = df['Net'].map(lambda x: f"${x:,.2f}")
     data = df[['Date','Purchase','Amount','Label']].reset_index().to_dict('records')
     className = 'd-none' if cat=='All' else ''
-    return data, make_expenses_fig(month), make_cat_detail_div(df_monthly,month,cat)
+    return data, make_expenses_fig(df_monthly,month), make_cat_detail_div(df_monthly,month,cat)
 
 
 
