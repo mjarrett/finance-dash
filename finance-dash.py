@@ -12,13 +12,12 @@ import dash_table
 from dash.exceptions import PreventUpdate 
 
 import pandas as pd
-import paramiko
 import datetime as dt
 import json
 import numpy as np
 import re
 import os
-
+import requests
 
 # colors = [
 #     '#1f77b4',  # muted blue
@@ -56,7 +55,9 @@ env_vars = ['USER1',
 'gid_savings_totals',
 'gid_assets',
 'NURSE_USER',
-'NURSE_PW']
+'NURSE_PW',
+'DATA_API_URL',
+'DATA_API_KEY']
 env = {k:os.environ[k] for k in env_vars}
 
 
@@ -111,7 +112,6 @@ def make_dfs():
     df_monthly = df_transactions.pivot_table(values='Net',index='Month',columns=['Category', 'Label'],aggfunc='sum')
     
     
-    
     # add assets to monthly df
     df_assets = get_sheet(env['url'],env['gid_assets']).applymap(tofloat)
     cols = pd.MultiIndex.from_tuples([('Assets',x) for x in df_assets.columns], names=['Category', 'Label'])
@@ -129,71 +129,28 @@ def make_dfs():
     df_monthly[('Income','Investment Interest')] = df['Interest']
     
     
-    try: #save to NURSE
-        print('Saving to NURSE')
-        ssh=paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect('home.mikejarrett.ca',22,env['NURSE_USER'],env['NURSE_PW'])
-        sftp_client = ssh.open_sftp()
-        monthly_file = sftp_client.open('/home/msj/finance-dash/data/df_monthly.csv','w')
-        transactions_file = sftp_client.open('/home/msj/finance-dash/data/df_transactions.csv','w')
-        df_monthly.to_csv(monthly_file)
-        df_transactions.to_csv(transactions_file, index=True)
-        monthly_file.close()
-        transactions_file.close()
-        print('Saved to NURSE')
-        
-    except: 
-        pass
+    # Push to API
+    r = requests.post(f"{DATA_API_URL}{DATA_API_KEY}/finances/summary", 
+                  data=df_monthly.to_csv().encode('utf-8'))
+
+    r = requests.post(f"{DATA_API_URL}{DATA_API_KEY}/finances/transactions", 
+                  data=df_transactions.to_csv().encode('utf-8'), headers=headers)
     
-    finally: # save local regardless
-        if not os.path.exists('data'):
-            os.makedirs('data')
-        df_monthly.to_csv('data/df_monthly.csv')
-        df_transactions.to_csv('data/df_transactions.csv', index=True)
-        print('Saved locally')
-    return df_monthly, df_transactions
-  
-def get_dfs():
-    # First try local read. If that fails, try to read from NURSE. if that fails, make_dfs()
     
-    try:
-        df_monthly = pd.read_csv('data/df_monthly.csv', header=[0,1], index_col=0)
-        df_monthly.index = pd.to_datetime(df_monthly.index)
-        df_transactions = pd.read_csv('data/df_transactions.csv', index_col='Date')
-        df_transactions.index = pd.to_datetime(df_transactions.index)
-        print('files read locally')
-        return df_monthly, df_transactions
     
-    except:
-        
-        try:
-            print('reading file from NURSE')
-            ssh=paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect('home.mikejarrett.ca',22,env['NURSE_USER'],env['NURSE_PW'])
-            sftp_client = ssh.open_sftp()
-            monthly_file = sftp_client.open('/home/msj/finance-dash/data/df_monthly.csv')
-            transactions_file = sftp_client.open('/home/msj/finance-dash/data/df_transactions.csv')
-            df_monthly = pd.read_csv(monthly_file, header=[0,1], index_col=0)
-            df_monthly.index = pd.to_datetime(df_monthly.index)
-            df_transactions = pd.read_csv(transactions_file, index_col='Date')
-            df_transactions.index = pd.to_datetime(df_transactions.index)
-            monthly_file.close()
-            transactions_file.close()
-            print('files read from NURSE')
-            
-            df_monthly.to_csv(monthly_file)
-            df_transactions.to_csv(transactions_file, index=True)
-            monthly_file.close()
-            transactions_file.close()
-            print('files saved locally')
-            
-            return df_monthly, df_transactions
-        except Exception as e:
-            print(e)
-            return make_dfs()
-    
+def get_summary():
+
+
+    df = pd.read_csv(f"{env['DATA_API_URL']}{env['DATA_API_KEY']}/finances/summary", header=[0,1], index_col=0)
+    df.index = pd.to_datetime(df.index)
+    return df
+
+def get_transactions():
+
+
+    df = pd.read_csv(f"{env['DATA_API_URL']}{env['DATA_API_KEY']}/finances/transactions", index_col='Date')
+    df.index = pd.to_datetime(df.index)
+    return df
         
     
     
@@ -213,7 +170,6 @@ def get_sheet(baseurl,gid,):
 
     return df
 
-#make_dfs()
 
 external_stylesheets = [dbc.themes.BOOTSTRAP]
 
@@ -260,7 +216,7 @@ def make_datatable(df,tabid):
 
 def make_fig1():
 
-    df_monthly, df_transactions = get_dfs()   
+    df_monthly = get_summary()   
     df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])].sum(1)
     df_housing = df_monthly['Housing'].sum(1)
     df_savings = df_monthly['Savings'].sum(1)
@@ -357,7 +313,7 @@ def make_fig1():
     return fig
 
 def make_expenses_fig(date_str='All'): 
-    df_monthly, df_transactions = get_dfs()
+    df_monthly = get_summary()
     df = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
 
     if date_str == 'All':
@@ -397,7 +353,7 @@ def make_cat_detail_fig(df_monthly,date_str,cat):
 
 def make_assets_detail_fig():
 
-    df_monthly, df_transactions = get_dfs()
+    df_monthly = get_summary()
     df_monthly[('Assets','Home Equity')] = df_monthly['Assets']['Home value'] + df_monthly['Assets']['Mortgage balance']
     cols =  [col for col in df_monthly['Assets'].columns if col not in ['Total Liquid','Net Worth','Home value','Mortgage balance']]
     fig = px.area(df_monthly.loc['2020-04-01':]['Assets'][cols])
@@ -460,7 +416,8 @@ def make_layout():
     year = today.strftime('%Y')
     month = today.strftime('%Y-%m')
     
-    df_monthly, df_transactions = get_dfs()
+    df_monthly = get_summary()
+    df_transactions = get_transactions()
     df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
     df_housing = df_monthly['Housing']
     df_savings = df_monthly['Savings']
@@ -708,7 +665,8 @@ def refresh_data(n_clicks):
                 Output('expenses-detail-div', 'children')],
               [Input('category-dropdown','value'),Input('month-dropdown','value')])
 def update_datatable(cat,month):
-    df_monthly, df_transactions = get_dfs()
+    df_monthly = get_summary() 
+    df_transactions = get_transactions()
     
     df = df_transactions.copy()
     if month != 'All':
