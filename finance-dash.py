@@ -141,14 +141,14 @@ def make_dfs():
 def get_summary():
 
 
-    df = pd.read_csv(f"{env['DATA_API_URL']}{env['DATA_API_KEY']}/finances/summary", header=[0,1], index_col=0)
+    df = pd.read_csv(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=summary", header=[0,1], index_col=0)
     df.index = pd.to_datetime(df.index)
     return df
 
 def get_transactions():
 
 
-    df = pd.read_csv(f"{env['DATA_API_URL']}{env['DATA_API_KEY']}/finances/transactions", index_col='Date')
+    df = pd.read_csv(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=transactions", index_col='Date')
     df.index = pd.to_datetime(df.index)
     return df
         
