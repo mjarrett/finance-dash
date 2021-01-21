@@ -130,18 +130,22 @@ def make_dfs():
     
     
     # Push to API
-    r = requests.post(f"{env['DATA_API_URL']}{env['DATA_API_KEY']}/finances/summary", 
+    r = requests.post(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=summary", 
                   data=df_monthly.to_csv().encode('utf-8'))
 
-    r = requests.post(f"{env['DATA_API_URL']}{env['DATA_API_KEY']}/finances/transactions", 
+    r = requests.post(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=transactions", 
                   data=df_transactions.to_csv().encode('utf-8'))
     
     
     
 def get_summary():
 
-
-    df = pd.read_csv(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=summary", header=[0,1], index_col=0)
+    try:
+        df = pd.read_csv(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=summary", header=[0,1], index_col=0)
+    except Exception as e:
+        print(f"Failure: {env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=summary")
+        
+    
     df.index = pd.to_datetime(df.index)
     return df
 
@@ -413,8 +417,17 @@ def make_layout():
     year = today.strftime('%Y')
     month = today.strftime('%Y-%m')
     
-    df_monthly = get_summary()
-    df_transactions = get_transactions()
+    try:
+        df_monthly = get_summary()
+        df_transactions = get_transactions()
+    except:
+        print("Loading files failed, let's make new ones")
+        make_dfs()
+        df_monthly = get_summary()
+        df_transactions = get_transactions()
+    
+        
+        
     df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
     df_housing = df_monthly['Housing']
     df_savings = df_monthly['Savings']
