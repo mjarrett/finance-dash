@@ -11,13 +11,13 @@ from dash.dependencies import Input, Output
 import dash_table
 from dash.exceptions import PreventUpdate 
 
-from credentials import *
-
 import pandas as pd
 import datetime as dt
 import json
 import numpy as np
 import re
+import os
+import requests
 
 # colors = [
 #     '#1f77b4',  # muted blue
@@ -37,8 +37,43 @@ colors = {'Expenses':'#1f77b4',
           'Income':'#d62728'
          }
 
+
+env_vars = ['USER1',
+'PW1',
+'USER2',
+'PW2',
+'raw_url',
+'url',
+'gid_summary',
+'gid_income',
+'gid_visa_transactions',
+'gid_chequing_transactions',
+'gid_visa_mike_transactions',
+'gid_other_transactions',
+'gid_housing',
+'gid_savings',
+'gid_savings_totals',
+'gid_assets',
+'NURSE_USER',
+'NURSE_PW',
+'DATA_API_URL',
+'DATA_API_KEY']
+env = {k:os.environ[k] for k in env_vars}
+
+
+
+VALID_USERNAME_PASSWORD_PAIRS = {
+    env['USER1']: env['PW1'],
+    env['USER2']: env['PW2']
+}
+
+
+
+
+
 def make_dfs():
     
+        
     print('Querying google doc')
 
     today = dt.datetime.now()
@@ -53,10 +88,10 @@ def make_dfs():
 
 
 
-    df_visa_transactions = get_sheet(url,gid_visa_transactions)
-    df_chequing_transactions = get_sheet(url,gid_chequing_transactions)
-    df_visa_mike_transactions = get_sheet(url,gid_visa_mike_transactions)
-    df_other_transactions = get_sheet(url,gid_other_transactions)
+    df_visa_transactions = get_sheet(env['url'],env['gid_visa_transactions'])
+    df_chequing_transactions = get_sheet(env['url'],env['gid_chequing_transactions'])
+    df_visa_mike_transactions = get_sheet(env['url'],env['gid_visa_mike_transactions'])
+    df_other_transactions = get_sheet(env['url'],env['gid_other_transactions'])
 
     
     
@@ -77,29 +112,50 @@ def make_dfs():
     df_monthly = df_transactions.pivot_table(values='Net',index='Month',columns=['Category', 'Label'],aggfunc='sum')
     
     
-    
     # add assets to monthly df
-    df_assets = get_sheet(url,gid_assets).applymap(tofloat)
+    df_assets = get_sheet(env['url'],env['gid_assets']).applymap(tofloat)
     cols = pd.MultiIndex.from_tuples([('Assets',x) for x in df_assets.columns], names=['Category', 'Label'])
     df_monthly = pd.concat([df_monthly,pd.DataFrame(df_assets.values,columns=cols, index=df_assets.index)], axis=1)
     
-    df_monthly.to_csv('data/df_monthly.csv')
-    df_transactions.to_csv('data/df_transactions.csv', index=True)
     
-    return df_monthly, df_transactions
-  
-def get_dfs():
     
+    # add interest on assets to monthly df
+    df = pd.DataFrame()
+    investment_accounts = ['Mike TFSA','Mike RRSP','Christa TFSA','Christa RRSP','Mike Other Inv','Christa Other Inv']
+    df['Assets'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1)
+    df['Contributions'] = df_monthly['Savings'].sum(1)
+    df['Interest'] = df_monthly['Assets'].loc[:,investment_accounts].sum(1).diff() - df['Contributions'].shift(1)
+    df = df.loc['2020-05-01':].iloc[:-1]
+    df_monthly[('Income','Investment Interest')] = df['Interest']
+    
+    
+    # Push to API
+    r = requests.post(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=summary", 
+                  data=df_monthly.to_csv().encode('utf-8'))
+
+    r = requests.post(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=transactions", 
+                  data=df_transactions.to_csv().encode('utf-8'))
+    
+    
+    
+def get_summary():
+
     try:
-        df_monthly = pd.read_csv('data/df_monthly.csv', header=[0,1], index_col=0)
-        df_monthly.index = pd.to_datetime(df_monthly.index)
-        df_transactions = pd.read_csv('data/df_transactions.csv', index_col='Date')
-        df_transactions.index = pd.to_datetime(df_transactions.index)
+        df = pd.read_csv(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=summary", header=[0,1], index_col=0)
+    except Exception as e:
+        print(f"Failure: {env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=summary")
         
-        return df_monthly, df_transactions
+    
+    df.index = pd.to_datetime(df.index)
+    return df
+
+def get_transactions():
+
+
+    df = pd.read_csv(f"{env['DATA_API_URL']}/files?pubkey={env['DATA_API_KEY']}&filename=transactions", index_col='Date')
+    df.index = pd.to_datetime(df.index)
+    return df
         
-    except FileNotFoundError:
-        return make_dfs()
     
     
     
@@ -118,12 +174,12 @@ def get_sheet(baseurl,gid,):
 
     return df
 
-#make_dfs()
 
 external_stylesheets = [dbc.themes.BOOTSTRAP]
 
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 app.title = 'Home Finances'
+server = app.server
 #######
 # AUTH : https://dash.plot.ly/authentication
 #auth = dash_auth.BasicAuth(
@@ -136,7 +192,9 @@ app.title = 'Home Finances'
 def make_datatable(df,tabid):
     df.index.name = 'Date'
     df = df.reset_index()
-    df = df[['Date','Purchase','Price','Refund','Label']]
+    df['Amount'] = df['Net'].map(lambda x: f"${x:,.2f}")
+
+    df = df[['Date','Purchase','Amount','Label']]
 
     table = dash_table.DataTable(
         id=tabid,
@@ -160,9 +218,8 @@ def make_datatable(df,tabid):
  
     
 
-def make_fig1():
+def make_fig1(df_monthly):
 
-    df_monthly, df_transactions = get_dfs()   
     df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])].sum(1)
     df_housing = df_monthly['Housing'].sum(1)
     df_savings = df_monthly['Savings'].sum(1)
@@ -258,8 +315,7 @@ def make_fig1():
 
     return fig
 
-def make_expenses_fig(date_str='All'): 
-    df_monthly, df_transactions = get_dfs()
+def make_expenses_fig(df_monthly,date_str='All'): 
     df = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
 
     if date_str == 'All':
@@ -297,9 +353,8 @@ def make_cat_detail_fig(df_monthly,date_str,cat):
     
     return fig
 
-def make_assets_detail_fig():
+def make_assets_detail_fig(df_monthly):
 
-    df_monthly, df_transactions = get_dfs()
     df_monthly[('Assets','Home Equity')] = df_monthly['Assets']['Home value'] + df_monthly['Assets']['Mortgage balance']
     cols =  [col for col in df_monthly['Assets'].columns if col not in ['Total Liquid','Net Worth','Home value','Mortgage balance']]
     fig = px.area(df_monthly.loc['2020-04-01':]['Assets'][cols])
@@ -360,8 +415,19 @@ def make_layout():
     start_str = start.strftime('%Y-%m-%d')
     limit_str = limit.strftime('%Y-%m-%d')
     year = today.strftime('%Y')
+    month = today.strftime('%Y-%m')
     
-    df_monthly, df_transactions = get_dfs()
+    try:
+        df_monthly = get_summary()
+        df_transactions = get_transactions()
+    except:
+        print("Loading files failed, let's make new ones")
+        make_dfs()
+        df_monthly = get_summary()
+        df_transactions = get_transactions()
+    
+        
+        
     df_expenses = df_monthly.loc[:,~df_monthly.columns.get_level_values(0).isin(['Housing','Income','Savings','Assets'])]
     df_housing = df_monthly['Housing']
     df_savings = df_monthly['Savings']
@@ -369,6 +435,12 @@ def make_layout():
     df_cashflow = df_income.sum(1)-df_housing.sum(1)-df_expenses.sum(1)
     curr_savings = df_cashflow.iloc[-2]
     ann_savings = df_cashflow.iloc[-13:-1].sum()
+    
+    # Compute interest on investiment accounts (increase minus contributions) since May 2020
+
+    curr_interest = df_monthly[('Income','Investment Interest')].iloc[-2]
+    ann_interest = df_monthly[('Income','Investment Interest')].iloc[-12:].sum()
+    
     controls = dbc.Card(
     [
         dbc.FormGroup(
@@ -390,7 +462,7 @@ def make_layout():
                 dcc.Dropdown(
                     id="month-dropdown",
                     options=[{"label": m.strftime('%b %Y'), "value": m.strftime('%Y-%m')} for m in df_monthly.index] + [{'label':'All','value':'All'}],
-                    value='All',
+                    value=df_monthly.index[-2].strftime('%Y-%m'),
                 ),
             ]
         ),
@@ -400,15 +472,14 @@ def make_layout():
     )
     
     tab_overview = dbc.Tab(label='Overview', children=[
- 
-          
-                html.Div(f"Avg monthly savings last 12 months: ${ann_savings/12:,.2f}"),
-                html.Div(f"Savings last month: ${curr_savings:,.2f}"),
 
+                dbc.Col(children=f"Avg monthly savings last 12 months: ${ann_savings/12:,.2f}", width=12),
+                dbc.Col(f"Savings last month: ${curr_savings:,.2f}", width=12),
+        
                 dbc.Row([
                     dbc.Col([
                     html.Div(id='current-cat-data',style={'display':'none'}),
-                    dcc.Graph(id='timeseries-graph',figure=make_fig1()),  
+                    dcc.Graph(id='timeseries-graph',figure=make_fig1(df_monthly)),  
                     ], width=12),
                 ]),
 
@@ -425,23 +496,29 @@ def make_layout():
     
     tab_expenses = dbc.Tab(label='Expenses', children=[
                 html.H3("Expenses"),
-                dbc.Row([
+                dbc.Row(justify="center", children=[
                     
-                    dbc.Col([
+                    dbc.Col( children=[
                         controls
                     ], width=6),
-                    dbc.Col([
-                        dcc.Graph(id='expenses-avg', figure=make_expenses_fig(),
+                ]),
+                dbc.Row(justify="center", children=[
+                    dbc.Col(children=[
+                        dcc.Graph(id='expenses-avg', figure=make_expenses_fig(df_monthly,month),
                                   config={'displayModeBar': False}
                                  ),
                     ], width=6),
-                    
-                    dbc.Col(id='expenses-detail-div', children=make_cat_detail_div(df_monthly,None,None), width=12),
-
+                ]),
+                dbc.Row(justify="center", children=[    
+                    dbc.Col(id='expenses-detail-div', children=make_cat_detail_div(df_monthly,None,None), width=6),
+                ]),
+        
+                dbc.Row(justify="center", children=[  
                     dbc.Col([
                         html.H3("Transactions"),
                         make_datatable(df_transactions, 'expenses-table')
                     ], width=12)
+                
                 ])
             ])
     
@@ -450,6 +527,9 @@ def make_layout():
                     html.H3("Savings"),
 
 
+
+                    
+            
                     dbc.Col([
                         html.Div(id='savings-detail-div', className='', children=[
                             dcc.Graph(id='savings-detail', figure=make_cat_detail_fig(df_monthly,None,'Savings')),
@@ -505,10 +585,12 @@ def make_layout():
     tab_assets = dbc.Tab(label='Assets', children=[
         dbc.Row([
                     html.H3("Assets"),
-
+                    dbc.Col(f"Total interest accumulated last 12 months: ${ann_interest:,.2f}", width=12),
+                    dbc.Col(f"Interest last month: ${curr_interest:,.2f}", width=12),
+            
                     dbc.Col([
                         html.Div(id='assets-detail-div', className='', children=[
-                            dcc.Graph(id='assets-detail', figure=make_assets_detail_fig()),
+                            dcc.Graph(id='assets-detail', figure=make_assets_detail_fig(df_monthly)),
                         ]),
                     ], width=12),
                 ]),
@@ -517,7 +599,7 @@ def make_layout():
             dash_table.DataTable(
                 id='assets-table',
                 columns=[{"name": i, "id": i} for i in df_assets.columns],
-                data=df_assets.iloc[::-1].to_dict('records'),
+                data=df_assets.iloc[::-1].applymap(lambda x: f"${x:,.2f}" if type(x)==float else x).to_dict('records'),
 #                 editable=False,
 #                 filter_action="native",
 #                 sort_action="native",
@@ -543,7 +625,7 @@ def make_layout():
 
             dbc.Col([
 
-                html.A("Here\'s the raw spreadsheet", href=raw_url, target="_blank"),
+                html.A("Here\'s the raw spreadsheet", href=env['raw_url'], target="_blank"),
             ], width=12),
             dbc.Col([
                 dbc.Button("Refresh data", size="md", className="mr-1", id='refresh-button'),
@@ -564,9 +646,12 @@ def make_layout():
     return layout
 
 # wrap the layout in the content div so i can refresh everything with a callback
-app.layout = html.Div([
-    html.Div(id='content', children=make_layout())
-])
+def layout():
+    return html.Div([
+               html.Div(id='content', children=make_layout())
+           ])
+
+app.layout = layout
 
 
 
@@ -576,18 +661,21 @@ app.layout = html.Div([
               [Input('refresh-button','n_clicks')])
 def refresh_data(n_clicks):
     if n_clicks is not None:
+        print('refresh data callback')
         make_dfs()
         return make_layout()
     
     else:
         raise PreventUpdate 
 
+
 # Update expenses tab
 @app.callback([Output('expenses-table','data'), Output('expenses-avg', 'figure'), 
                 Output('expenses-detail-div', 'children')],
               [Input('category-dropdown','value'),Input('month-dropdown','value')])
 def update_datatable(cat,month):
-    df_monthly, df_transactions = get_dfs()
+    df_monthly = get_summary() 
+    df_transactions = get_transactions()
     
     df = df_transactions.copy()
     if month != 'All':
@@ -596,12 +684,13 @@ def update_datatable(cat,month):
     if cat != 'All':
         df = df[df['Category']==cat]
 
-    df = df.reset_index()   
-    data = df[['Date','Purchase','Price','Refund','Label']].reset_index().to_dict('records')
+    df = df.reset_index()  
+    df['Amount'] = df['Net'].map(lambda x: f"${x:,.2f}")
+    data = df[['Date','Purchase','Amount','Label']].reset_index().to_dict('records')
     className = 'd-none' if cat=='All' else ''
-    return data, make_expenses_fig(month), make_cat_detail_div(df_monthly,month,cat)
+    return data, make_expenses_fig(df_monthly,month), make_cat_detail_div(df_monthly,month,cat)
 
 
 
 if __name__ == '__main__':
-    app.run_server(debug=False,host='0.0.0.0',port=8050)
+    app.run_server(debug=True)
