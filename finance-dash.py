@@ -3,7 +3,7 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 import dash_bootstrap_components as dbc
-import dash_auth
+#import dash_auth
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -118,7 +118,7 @@ def get_sheet(baseurl,gid,):
 
     return df
 
-make_dfs()
+#make_dfs()
 
 external_stylesheets = [dbc.themes.BOOTSTRAP]
 
@@ -126,10 +126,10 @@ app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 app.title = 'Home Finances'
 #######
 # AUTH : https://dash.plot.ly/authentication
-auth = dash_auth.BasicAuth(
-    app,
-    VALID_USERNAME_PASSWORD_PAIRS
-)
+#auth = dash_auth.BasicAuth(
+    #app,
+    #VALID_USERNAME_PASSWORD_PAIRS
+    #)
 #######
 
 
